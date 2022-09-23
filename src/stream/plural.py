@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, cast
 # THIRD PARTY
 from astropy.coordinates import BaseCoordinateFrame, SkyCoord
 from astropy.coordinates import concatenate as concatenate_coords
-from astropy.table import Column, QTable
+from astropy.table import Column
 
 # LOCAL
 from stream.base import CollectionBase, StreamBase
@@ -24,6 +24,9 @@ from stream.utils.coord_utils import get_frame, parse_framelike
 from stream.utils.descriptors.cache import CacheProperty
 
 if TYPE_CHECKING:
+    # THIRD PARTY
+    from astropy.table import QTable
+
     # LOCAL
     from stream._typing import FrameLikeType
     from stream.clean.base import OutlierDetectorBase
@@ -140,7 +143,7 @@ class Stream(StreamArmsBase, StreamBase):
 
         # similarly for errors
         if data_err is not None:
-            data_err = cast(QTable, data_err.group_by("tail"))
+            data_err = cast("QTable", data_err.group_by("tail"))
             data_err.add_index("tail")
 
         if caches is None:
@@ -151,7 +154,7 @@ class Stream(StreamArmsBase, StreamBase):
             frame = parse_framelike(frame)
 
         # initialize each arm
-        groups_keys = cast(Column, data.groups.keys)
+        groups_keys = cast("Column", data.groups.keys)
         arm_names: tuple[str, ...] = tuple(groups_keys["tail"])
         arms: dict[str, StreamArm] = {}
         for k in arm_names:
