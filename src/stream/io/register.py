@@ -1,5 +1,3 @@
-# Licensed under a 3-clause BSD style license - see LICENSE.rst
-
 ##############################################################################
 # IMPORTS
 
@@ -12,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypedDict
 
 # THIRD PARTY
-from astropy.io.registry import UnifiedIORegistry
+from astropy.io.registry import IORegistryError, UnifiedIORegistry
 from importlib_metadata import EntryPoint, entry_points
 
 if TYPE_CHECKING:
@@ -75,7 +73,7 @@ class UnifiedIOEntryPointRegistrar:
         except Exception as e:
             # This stops the fitting from choking if an entry_point produces an error.
             warnings.warn(
-                f"{type(e).__name__} error occurred in entry point {name} -- not registering.\n\t{str(e)}",
+                f"{type(e).__name__} error occurred in entry point {name!r} -- not registering.\n\t{e.args}",
                 UserWarning,
                 stacklevel=2,
             )
@@ -92,7 +90,10 @@ class UnifiedIOEntryPointRegistrar:
         registry = value["registry"]
 
         registration_func = getattr(registry, "register_" + self.which)
-        registration_func(regname, data_class, value["func"])
+        try:
+            registration_func(regname, data_class, value["func"])
+        except IORegistryError as e:
+            warnings.warn(str(e))
 
         if "identify" in value:
             registry.register_identifier(regname, data_class, value["identify"], force=True)

@@ -1,6 +1,6 @@
 """Stream arm classes.
 
-Stream arms are descriptors on a `trackstrea.Stream` class.
+Stream arms are descriptors on a :class:`stream.Stream` class.
 
 """
 
@@ -10,20 +10,18 @@ Stream arms are descriptors on a `trackstrea.Stream` class.
 from __future__ import annotations
 
 # STDLIB
+import logging
 from dataclasses import InitVar, dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 # THIRD PARTY
-import astropy.units as u
+import astropy.coordinates as coords
 import numpy as np
-from astropy.coordinates import BaseCoordinateFrame, SkyCoord  # noqa: TC002
 from astropy.io.registry import UnifiedReadWriteMethod
-from astropy.units import Quantity
 from numpy.lib.recfunctions import structured_to_unstructured
 from typing_extensions import TypedDict
 
 # LOCAL
-from stream.base import StreamBase
 from stream.clean import OUTLIER_DETECTOR_CLASSES, OutlierDetectorBase
 from stream.io import (
     StreamArmFromFormat,
@@ -31,15 +29,18 @@ from stream.io import (
     StreamArmToFormat,
     StreamArmWrite,
 )
+from stream.stream.base import StreamBase, SupportsFrame
 from stream.utils.coord_utils import get_frame, parse_framelike
 
 if TYPE_CHECKING:
     # THIRD PARTY
+    from astropy.coordinates import BaseCoordinateFrame, SkyCoord
     from astropy.table import QTable
+    from astropy.units import Quantity
     from numpy.typing import NDArray
 
     # LOCAL
-    from stream.frame.result import FrameOptimizeResult
+    from stream.frame import FrameOptimizeResult
 
 
 __all__ = ["StreamArm"]
@@ -47,10 +48,6 @@ __all__ = ["StreamArm"]
 
 ##############################################################################
 # PARAMETERS
-
-
-class SupportsFrame(Protocol):
-    frame: BaseCoordinateFrame
 
 
 Self = TypeVar("Self", bound=SupportsFrame)  # from typing_extensions import Self
@@ -75,12 +72,12 @@ class StreamArm(StreamBase):
     _CACHE_CLS: ClassVar[type] = _StreamArmCache
 
     data: QTable
-    origin: SkyCoord
-    frame: BaseCoordinateFrame | None = None
+    origin: coords.SkyCoord
+    frame: coords.BaseCoordinateFrame | None = None
     name: str | None = None
     prior_cache: InitVar[dict[str, Any] | None] = None
 
-    def __post_init__(self, prior_cache: dict[str, Any] | None) -> None:
+    def __post_init__(self, prior_cache: dict[str, Any] | None) -> None:  # type: ignore
         # frame-like -> frame
         object.__setattr__(self, "frame", None if self.frame is None else parse_framelike(self.frame))
 
@@ -99,12 +96,11 @@ class StreamArm(StreamBase):
     def get_mask(self, minPmemb: Quantity | None = None, include_order: bool = True) -> NDArray[np.bool_]:
         """Which elements of the stream are masked."""
         minPmemb = self.flags.minPmemb if minPmemb is None else minPmemb
-        mask = (
-            (self.data["Pmemb"] < minPmemb)
-            & self.data["Pmemb"].mask
-            & (self.data["order"].mask if include_order else True)
-        )
-        return cast("np.ndarray[Any, np.dtype[np.bool_]]", mask)
+        mask = (self.data["Pmemb"] < minPmemb).unmasked | self.data["Pmemb"].mask
+        if include_order:
+            mask |= self.data["order"].mask
+
+        return mask
 
     @property
     def mask(self) -> NDArray[np.bool_]:
@@ -114,22 +110,32 @@ class StreamArm(StreamBase):
     @property
     def data_coords(self) -> SkyCoord:
         """Get ``coord`` from data table."""
-        return self.data["coord"][~self.mask]
+        return self.data["coords"][~self.mask]
 
     @property
     def data_frame(self) -> BaseCoordinateFrame:
         """The `astropy.coordinates.BaseCoordinateFrame` of the data."""
-        reptype = self.data["coord"].representation_type
+        reptype = self.data["coords"].representation_type
         if not self.has_distances:
             reptype = getattr(reptype, "_unit_representation", reptype)
 
         # Get the frame from the data
-        frame: BaseCoordinateFrame = self.data["coord"].frame.replicate_without_data(representation_type=reptype)
+        frame: BaseCoordinateFrame = self.data["coords"].frame.replicate_without_data(representation_type=reptype)
 
         return frame
 
     # ===============================================================
     # System stuff (fit dependent)
+
+    def _get_order(self, mask: NDArray[np.bool_]) -> NDArray[np.int64]:
+        """Get the order given a mask."""
+        # original order
+        iorder = self.data["order"][~mask]
+        # build order
+        unsorter = np.argsort(np.argsort(iorder))
+        neworder = np.arange(len(iorder), dtype=int)[unsorter]
+
+        return neworder
 
     @property
     def _best_frame(self) -> BaseCoordinateFrame:
@@ -140,7 +146,7 @@ class StreamArm(StreamBase):
     @property
     def coords(self) -> SkyCoord:
         """Data coordinates transformed to `Stream.frame` (if there is one)."""
-        order: np.ndarray[Any, np.dtype[np.bool_]] = self.data["order"][~self.data["order"].mask]
+        order = self._get_order(self.mask)
 
         dc = cast("SkyCoord", self.data_coords[order])
         frame = self._best_frame
@@ -154,69 +160,41 @@ class StreamArm(StreamBase):
     # Cleaning Data
 
     # TODO! change to added property
-    def mask_outliers(self, outlier_method: str | OutlierDetectorBase = "scipyKDTreeLOF", **kwargs: Any) -> None:
-        """Detect and label outliers, masking their Pmemb and order."""
+    def mask_outliers(
+        self, outlier_method: str | OutlierDetectorBase = "scipyKDTreeLOF", *, verbose: bool = False, **kwargs: Any
+    ) -> None:
+        """Detect and label outliers, masking their Pmemb and order.
+
+        This is done on the ``data_coords`` with minPmemb mask info.
+        """
+        mask = self.get_mask(include_order=False)
+        data_coords = self.data["coords"][~mask]
         # TODO! more complete, including velocity data
-        data = structured_to_unstructured(self.data_coords.data._values)
+        data = structured_to_unstructured(data_coords.data._values)
 
         if isinstance(outlier_method, str):
             outlier_method = OUTLIER_DETECTOR_CLASSES[outlier_method]()
         elif not isinstance(outlier_method, OutlierDetectorBase):
-            raise TypeError
+            raise TypeError("outlier_method must be a str or OutlierDetectorBase subclass instance")
 
+        # step 1: predict outlier
         isoutlier = outlier_method.fit_predict(data, data, **kwargs)
 
-        self.data["order"].mask = isoutlier
-        # TODO? also mask Pmemb?
+        if verbose:
+            idx = np.arange(len(self.data))
+            logger = logging.getLogger("stream")
+            logger.info(f"{self.full_name} outliers: {idx[~mask][isoutlier]}")
 
-    # ===============================================================
-    # Convenience Methods
+        # step 2: set order of outliers to -1
+        mask[~mask] = isoutlier
+        self.data["order"][mask] = -1
 
-    def fit_frame(
-        self: StreamArm,
-        rot0: Quantity[u.deg] | None = Quantity(0, u.deg),
-        *,
-        force: bool = False,
-        **kwargs: Any,
-    ) -> StreamArm:
-        """Convenience method to fit a frame to the data.
+        # step 3: get new order
+        neworder = self._get_order(mask)
+        self.data["order"][~mask] = neworder
 
-        The frame is an on-sky rotated frame.
-        To prevent a frame from being fit, the desired frame should be passed
-        to the Stream constructor at initialization.
-
-        Parameters
-        ----------
-        rot0 : |Quantity| or None.
-            Initial guess for rotation.
-
-        force : bool, optional keyword-only
-            Whether to force a frame fit. Default `False`.
-            Will only fit if a frame was not specified at initialization.
-
-        **kwargs : Any
-            Passed to fitter.
-
-        Returns
-        -------
-        StreamArm
-            A copy, with `frame` replaced.
-
-        Raises
-        ------
-        ValueError
-            If a frame has already been fit and `force` is not `True`.
-        TypeError
-            If a system frame was given at initialization.
-        """
-        if self.frame is not None and not force:
-            raise TypeError("a system frame was given at initialization. Use ``force`` to re-fit.")
-
-        # LOCAL
-        from stream.frame.fit import fit_frame
-
-        newstream: StreamArm = fit_frame(self, rot0=rot0, **kwargs)
-        return newstream
+        # step 4: remask
+        self.data["order"].mask = mask
 
     # ===============================================================
     # Misc
@@ -233,7 +211,11 @@ class StreamArm(StreamBase):
 
 
 @get_frame.register
-def _get_frame_streamarm(stream: StreamArm, /) -> BaseCoordinateFrame:
+def _get_frame_streamarm(stream: StreamArm, /) -> coords.BaseCoordinateFrame:
     if stream.frame is None:
-        raise ValueError("need to fit a frame")
+        # LOCAL
+        from stream.stream.base import FRAME_NONE_ERR
+
+        raise FRAME_NONE_ERR
+
     return stream.frame

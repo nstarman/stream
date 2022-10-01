@@ -1,5 +1,3 @@
-"""Core Functions."""
-
 ##############################################################################
 # IMPORTS
 
@@ -34,9 +32,14 @@ __all__: list[str] = []
 class StreamArmDataNormalizer:
     """Instance-level descriptor to normalize stream data tables.
 
+    Attributes
+    ----------
+    frame : BaseCoordinateFrame or None
+        The frame of the stream.
+
     Methods
     -------
-    run(original, original_err)
+    __call__(original, original_err)
         Run the normalizer.
     """
 
@@ -57,34 +60,52 @@ class StreamArmDataNormalizer:
 
         Returns
         -------
-        data : :class:`~astropy.table.QTable`
+        data : `~astropy.table.QTable`
         """
         data = QTable()  # going to be assigned in-place
         data.meta = {}
 
-        # 1) data probability. `data` modded in-place
+        # 0) stream arm index. `data` modded in-place.
+        self._data_arm_index(original, out=data)
+
+        # 1) data probability. `data` modded in-place.
         self._data_probability(original, out=data, default_weight=1)
 
-        # 2) coordinates. `data` modded in-place
+        # 2) coordinates. `data` modded in-place.
         self._data_coordinates(original, original_err, out=data)
 
-        # 3) ordering
-        self._data_index(original, out=data)
+        # 3) ordering.
+        self._data_order(original, out=data)
 
         # Metadata
         meta = copy.deepcopy(original.meta) if isinstance(original.meta, Mapping) else {}
         data.meta = {**meta, **data.meta}
 
-        # Finally, merge original_err into original
+        # Finally, merge original_err into data
         # TODO!
         # https://docs.astropy.org/en/stable/table/operations.html#merging-details
-        # TODO! make sure `tail` matches
+        # TODO! make sure `arm` matches
         if original_err is not None:
-            for n in original_err.colnames:
+            for n in set(original_err.colnames) - {"arm"}:
                 nn = f"err_{n}" if n in original.colnames else n
-                original[nn] = original_err[n]
+                if nn in data.colnames:
+                    continue
+
+                data[nn] = original_err[n]
 
         return data
+
+    def _data_arm_index(self, original: Table, *, out: QTable) -> None:
+        """Data stream arm index. A string.
+
+        Parameters
+        ----------
+        original : |Table|
+            The original data.
+        out : |QTable|, keyword-only
+            The normalized data.
+        """
+        out["arm"] = original["arm"]
 
     def _data_probability(
         self,
@@ -99,17 +120,12 @@ class StreamArmDataNormalizer:
         ----------
         original : |Table|
             The original data.
-
         out : |QTable|, keyword-only
             The normalized data.
         default_weight : float, optional keyword-only
             The default membership probability.
             If float, then range 0-1 maps to 0-100%.
-            If has unit of percent, then unchanged
-
-        Returns
-        -------
-        None
+            If has unit of percent, then unchanged.
         """
         colns = [n.lower() for n in original.colnames]  # lower-case columns
 
@@ -150,39 +166,32 @@ class StreamArmDataNormalizer:
             The original data.
         original_err : |Table| or None, optional
             The error in the original data.
-
-        out : |QTable|
-            The stream data.
-
-        Returns
-        -------
-        None
+        out : |QTable|, keyword-only
+            The normalized data.
         """
         # ----------
         # 1) the data
 
-        # First look for a column "coord"
-        if "coord" in original.colnames:
-            osc = SkyCoord(original["coord"], copy=False)
+        # First look for a column "coords"
+        if "coords" in original.colnames:
+            osc = SkyCoord(original["coords"], copy=False)
         else:
             osc = SkyCoord.guess_from_table(original)
 
-        # add coordinates to stream
-        self.original_coord: SkyCoord | None
-        object.__setattr__(self, "original_coord", osc)
-
+        # Add coordinates to stream
         if self.frame is None:  # no new frame
-            sc = osc
+            to_frame = osc.frame
+            to_rep = type(osc.data)
+            to_dif = type(osc.data.differentials["s"]) if "s" in osc.data.differentials else None
         else:
-            sc = deep_transform_to(
-                osc,
-                self.frame,
-                self.frame.representation_type,
-                self.frame.differential_type if "s" in osc.data.differentials else None,
-            )
+            to_frame = self.frame
+            to_rep, to_dif = to_frame.representation_type, to_frame.differential_type
+
+        sc: SkyCoord
+        sc = deep_transform_to(osc, to_frame, to_rep, to_dif)
 
         # it's now clean and can be added
-        out["coord"] = sc
+        out["coords"] = sc
 
         # ----------
         # 2) the error
@@ -208,19 +217,15 @@ class StreamArmDataNormalizer:
             else:
                 out[dn] = 0 * getattr(sc, n)  # (get correct units)
 
-    def _data_index(self, original: Table, *, out: QTable) -> None:
+    def _data_order(self, original: Table, *, out: QTable) -> None:
         """Data ordering.
 
         Parameters
         ----------
         original : |Table|
             The original data.
-        out : |QTable|, optional keyword-only
+        out : |QTable|, keyword-only
             The normalized data.
-
-        Returns
-        -------
-        None
         """
         # Intra-arm ordering.
         if "order" in original.colnames:  # transfer if available.

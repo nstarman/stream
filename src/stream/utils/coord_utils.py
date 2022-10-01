@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 # STDLIB
-import functools
-from typing import TYPE_CHECKING, Literal, NoReturn, TypeVar, Union
+from functools import singledispatch
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 # THIRD PARTY
 from astropy.coordinates import (
@@ -39,8 +39,8 @@ _RT = TypeVar("_RT", bound=BaseRepresentation)
 ##############################################################################
 
 
-@functools.singledispatch
-def parse_framelike(frame: object) -> NoReturn:
+@singledispatch
+def parse_framelike(frame: object) -> Any:  # https://github.com/python/mypy/issues/11727
     """Determine the frame and return a blank instance.
 
     Parameters
@@ -64,8 +64,8 @@ def parse_framelike(frame: object) -> NoReturn:
 
     See Also
     --------
-    resolve_to_frame
-    """ """Determine the frame and return a blank instance.
+    get_frame
+        Determine the frame and return a blank instance.
 
     Parameters
     ----------
@@ -88,13 +88,13 @@ def parse_framelike(frame: object) -> NoReturn:
 
     See Also
     --------
-    resolve_to_frame
+    get_frame
     """
     raise NotImplementedError(f"frame type {type(frame)} not dispatched")
 
 
-@functools.singledispatch
-def get_frame(frame: object) -> None:
+@singledispatch
+def get_frame(frame: object) -> Any:  # https://github.com/python/mypy/issues/11727
     """Determine the frame and return a blank instance.
 
     Parameters
@@ -156,13 +156,13 @@ def _get_frame_skycoord(frame: SkyCoord) -> BaseCoordinateFrame:
 _DifT: TypeAlias = Union[type[BaseDifferential], None, Literal["base"]]
 
 
-@functools.singledispatch
+@singledispatch
 def deep_transform_to(
     crd: object,
     frame: BaseCoordinateFrame,
     representation_type: type[BaseRepresentation],
     differential_type: _DifT,
-) -> NoReturn:
+) -> Any:  # https://github.com/python/mypy/issues/11727
     """Transform a coordinate to a frame and representation type.
 
     For speed, Astropy transformations can be shallow. This function does
@@ -197,9 +197,11 @@ def _deep_transform_frame(
     differential_type: _DifT,
 ) -> BaseCoordinateFrame:
     f = crd.transform_to(frame)
-    r = crd.represent_as(representation_type, s=differential_type)
 
-    dt = differential_type if differential_type != "base" else type(r.differentials["s"])
+    dt = None if "s" not in crd.data.differentials else differential_type
+    r = crd.represent_as(representation_type, s=dt)
+
+    dt = dt if dt != "base" else type(r.differentials["s"])
 
     frame = f.realize_frame(r, representation_type=representation_type, differential_type=dt, copy=False)
 
@@ -213,6 +215,9 @@ def _deep_transform_skycoord(
     representation_type: type[BaseRepresentation],
     differential_type: _DifT,
 ) -> SkyCoord:
-    return deep_transform_to(
-        crd.frame, frame=frame, representation_type=representation_type, differential_type=differential_type
+    return SkyCoord(
+        deep_transform_to(
+            crd.frame, frame=frame, representation_type=representation_type, differential_type=differential_type
+        ),
+        copy=False,
     )

@@ -1,6 +1,6 @@
 """Stream arm classes.
 
-Stream arms are descriptors on a `trackstrea.Stream` class.
+Stream arms are descriptors on a `stream.Stream` class.
 
 """
 
@@ -10,36 +10,48 @@ Stream arms are descriptors on a `trackstrea.Stream` class.
 from __future__ import annotations
 
 # STDLIB
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    NoReturn,
+    TypedDict,
+    TypeVar,
+    cast,
+    final,
+)
 
 # THIRD PARTY
 from astropy.coordinates import BaseCoordinateFrame, SkyCoord
 from astropy.coordinates import concatenate as concatenate_coords
-from astropy.table import Column
 
 # LOCAL
-from stream.base import CollectionBase, StreamBase
-from stream.core import StreamArm
+from stream.stream.base import StreamBase
+from stream.stream.core import StreamArm
+from stream.stream.plural import StreamArms, StreamArmsBase
 from stream.utils.coord_utils import get_frame, parse_framelike
+from stream.utils.descriptors.bound import BoundDescriptor
 from stream.utils.descriptors.cache import CacheProperty
 
 if TYPE_CHECKING:
     # THIRD PARTY
-    from astropy.table import QTable
+    from astropy.table import Column, QTable
 
     # LOCAL
     from stream._typing import FrameLikeType
     from stream.clean.base import OutlierDetectorBase
+    from stream.common import CollectionBase
     from stream.frame.fit.result import FrameOptimizeResult
 
 
-__all__ = ["StreamArmsBase", "StreamArms", "Stream"]
+__all__ = ["Stream"]
 
 
 ##############################################################################
 # PARAMETERS
 
-Self = TypeVar("Self", bound="CollectionBase")  # type: ignore  # from typing_extensions import Self
+Self = TypeVar("Self", bound="CollectionBase")  # type: ignore # from typing_extensions import Self
 
 
 class _StreamCache(TypedDict):
@@ -52,26 +64,27 @@ class _StreamCache(TypedDict):
 ##############################################################################
 
 
-class StreamArmsBase(CollectionBase[StreamArm]):
-    """Base class for a collection of stream arms."""
+class StreamArmsDescriptor(StreamArms, BoundDescriptor["Stream"]):
+    def __init__(self, store_in: Literal["__dict__", "_attrs_"] | None = "__dict__") -> None:
+        object.__setattr__(self, "store_in", store_in)
+        super().__post_init__()  # from BoundDescriptor
+
+    @property
+    def _data(self) -> dict[str, StreamArm]:  # type: ignore
+        return self.enclosing._data
+
+    @property
+    def name(self) -> str | None:
+        return self.enclosing.name
+
+    def __set__(self, obj: object, value: Any) -> NoReturn:
+        raise AttributeError
 
 
-#####################################################################
+# ===================================================================
 
 
-class StreamArms(StreamArmsBase):
-    """A collection of stream arms.
-
-    See Also
-    --------
-    Stream
-        An object that brings together 2 stream arms, but acts like 1 stream.
-    """
-
-
-#####################################################################
-
-
+@final
 class Stream(StreamArmsBase, StreamBase):
     """A Stellar Stream.
 
@@ -97,11 +110,13 @@ class Stream(StreamArmsBase, StreamBase):
 
     _CACHE_CLS: ClassVar[type] = _StreamCache
     cache = CacheProperty["StreamBase"]()
+    arms = StreamArmsDescriptor()
 
     def __init__(
         self, data: dict[str, StreamArm] | None = None, /, *, name: str | None = None, **kwargs: StreamArm
     ) -> None:
 
+        self.name: str | None
         super().__init__(data, name=name, **kwargs)
 
         cache = CacheProperty._init_cache(self)
@@ -112,19 +127,19 @@ class Stream(StreamArmsBase, StreamBase):
         if len(self._data) > 2:
             raise NotImplementedError(">2 stream arms are not yet supported")
 
-        # validate that all the data frames are the same
-        data_frame = self.data_frame
-        origin = self.origin
-        frame = self.frame
-        for name, arm in self.items():
-            if not arm.data_frame == data_frame:
-                raise ValueError(f"arm {name} data-frame must match {data_frame}")
+        # # validate that all the data frames are the same
+        # data_frame = self.data_frame
+        # origin = self.origin
+        # frame = self.frame
+        # for name, arm in self.items():
+        #     if not arm.data_frame == data_frame:
+        #         raise ValueError(f"arm {name} data-frame must match {data_frame}")
 
-            if not arm.origin == origin:
-                raise ValueError(f"arm {name} origin must match {origin}")
+        #     if not arm.origin == origin:
+        #         raise ValueError(f"arm {name} origin must match {origin}")
 
-            if not arm.frame == frame:
-                raise ValueError(f"arm {name} origin must match {frame}")
+        #     if not arm.frame == frame:
+        #         raise ValueError(f"arm {name} origin must match {frame}")
 
     @classmethod
     def from_data(
@@ -138,8 +153,8 @@ class Stream(StreamArmsBase, StreamBase):
         caches: dict[str, dict[str, Any] | None] | None = None,
     ) -> Self:
         # split data by arm
-        data = data.group_by("tail")
-        data.add_index("tail")
+        data = data.group_by("arm")
+        data.add_index("arm")
 
         # similarly for errors
         if data_err is not None:
@@ -225,11 +240,6 @@ class Stream(StreamArmsBase, StreamBase):
             arm.mask_outliers(outlier_method, **kwargs)
 
     # ===============================================================
-    # Convenience Methods
-
-    fit_frame = StreamArm.fit_frame
-
-    # ===============================================================
     # Misc
 
     def __len__(self) -> int:
@@ -255,5 +265,9 @@ class Stream(StreamArmsBase, StreamBase):
 @get_frame.register
 def _get_frame_stream(stream: Stream, /) -> BaseCoordinateFrame:
     if stream.frame is None:
-        raise ValueError("need to fit a frame")
+        # LOCAL
+        from .base import FRAME_NONE_ERR
+
+        raise FRAME_NONE_ERR
+
     return stream.frame

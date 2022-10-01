@@ -1,5 +1,3 @@
-# Licensed under a 3-clause BSD style license - see LICENSE.rst
-
 ##############################################################################
 # IMPORTS
 
@@ -9,14 +7,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 # THIRD PARTY
-from astropy.io.registry import UnifiedIORegistry, UnifiedReadWrite
+from astropy.io.registry.core import UnifiedIORegistry
+from astropy.io.registry.interface import UnifiedReadWrite
 
 if TYPE_CHECKING:
     # LOCAL
     from stream.core import StreamArm
 
 
-__all__ = ["StreamArmRead", "StreamArmWrite", "StreamArmFromFormat", "StreamArmToFormat"]
+__all__: list[str] = []
 __doctest_skip__ = __all__
 
 
@@ -102,7 +101,7 @@ class StreamArmRead(UnifiedReadWrite):  # type: ignore
         if not isinstance(arm, StreamArm):  # TODO! this should type narrow
             raise OSError()
 
-        return arm  # type: ignore
+        return arm
 
 
 class StreamArmWrite(UnifiedReadWrite):  # type: ignore

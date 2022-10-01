@@ -7,27 +7,23 @@ from __future__ import annotations
 
 # STDLIB
 import functools
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Tuple, TypedDict, Union
 
 # THIRD PARTY
+import astropy.coordinates as coords
 import astropy.units as u
 import numpy as np
 import scipy.optimize as opt
-from astropy.coordinates import (
-    BaseCoordinateFrame,
-    CartesianRepresentation,
-    SkyCoord,
-    UnitSphericalRepresentation,
-)
 from astropy.coordinates.matrix_utilities import rotation_matrix
 from astropy.units import Quantity
 from erfa import ufunc as erfa_ufunc
 from numpy import ndarray
 
 # LOCAL
-from stream import Stream, StreamArm
 from stream.frame.result import FrameOptimizeResult
+from stream.stream.core import StreamArm
+from stream.stream.plural import StreamArmsBase
+from stream.stream.stream import Stream
 from stream.utils.coord_utils import get_frame
 
 if TYPE_CHECKING:
@@ -35,7 +31,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from typing_extensions import TypeAlias
 
-__all__ = ["fit_frame"]
+__all__: list[str] = []
 
 
 ##############################################################################
@@ -46,7 +42,7 @@ __all__ = ["fit_frame"]
 def reference_to_skyoffset_matrix(
     lon: float | Quantity, lat: float | Quantity, rotation: float | Quantity
 ) -> NDArray[np.float64]:
-    """Convert a reference coordinate to an sky offset frame [astropy].
+    """Convert a reference coordinate to an sky offset frame ([astropy]_).
 
     Cartesian to Cartesian matrix transform.
 
@@ -79,7 +75,6 @@ def reference_to_skyoffset_matrix(
     .. [astropy] Astropy Collaboration (2013).
         Astropy: A community Python package for astronomy.
         Astronomy and Astrophysics, 558, A33.
-
     """
     # Define rotation matrices along the position angle vector, and
     # relative to the origin.
@@ -147,8 +142,8 @@ _default_minimize = opt.minimize
 
 
 class _FitFrameNeededInfo(TypedDict):
-    data: BaseCoordinateFrame | SkyCoord
-    origin: BaseCoordinateFrame | SkyCoord
+    data: coords.BaseCoordinateFrame | coords.SkyCoord
+    origin: coords.BaseCoordinateFrame | coords.SkyCoord
 
 
 @functools.singledispatch
@@ -166,75 +161,122 @@ def _fit_frame_dict(
     minimizer: str | Callable[..., Any] = _default_minimize,
     **minimizer_kwargs: Any,
 ) -> FrameOptimizeResult[Any]:
-
+    # Get the frame from the data. Needed for the origin and result.
     from_frame = get_frame(info["data"])
 
-    # Data from original coordinates
-    xyz: Quantity = info["data"].represent_as(UnitSphericalRepresentation).represent_as(CartesianRepresentation).xyz
+    # Represent that data in unitless on-unit-sphere Cartesian coordinates.
+    # Routing through UnitSphericalRepresentation to strip units and be on unit sphere.
+    xyz = info["data"].represent_as(coords.UnitSphericalRepresentation).represent_as(coords.CartesianRepresentation).xyz
 
-    # Put origin in same frame and rep type
-    orep: UnitSphericalRepresentation = (
-        info["origin"].transform_to(from_frame).represent_as(UnitSphericalRepresentation)
-    )
+    # Put origin in same frame as the data.
+    orep = info["origin"].transform_to(from_frame).represent_as(coords.UnitSphericalRepresentation)
 
     # Run minimizer
     x0 = Quantity([rot0, orep.lon, orep.lat], unit=u.deg).value
     optresult = run_minimizer(minimizer, data=xyz, x0=x0, minimizer_kwargs=minimizer_kwargs)
 
-    fores: FrameOptimizeResult[Any] = FrameOptimizeResult.from_result(optresult, from_frame=from_frame)
-    return fores
+    # store and return minimizer results
+    result: FrameOptimizeResult[Any] = FrameOptimizeResult.from_result(optresult, from_frame=from_frame)
+    return result
 
 
 @fit_frame.register(StreamArm)
-def _fit_frame_streamarm(
-    stream: StreamArm, rot0: _Rot0, *, minimizer: str | Callable[..., Any] = _default_minimize, **minimizer_kwargs: Any
-) -> StreamArm:
-
+def _fit_frame_StreamArm(
+    stream: StreamArm,
+    rot0: _Rot0,
+    *,
+    minimizer: str | Callable[..., Any] = _default_minimize,
+    **minimizer_kwargs: Any,
+) -> FrameOptimizeResult[Any]:
+    """Fit Frame to a stream arm."""
+    # Make dictionary of needed info
     info = _FitFrameNeededInfo(data=stream.data_coords, origin=stream.origin)
-
+    # Fit frame
     result: FrameOptimizeResult[Any] = _fit_frame_dict(info, rot0=rot0, minimizer=minimizer, **minimizer_kwargs)
 
-    # Make new stream
-    newstream = replace(stream, frame=result.frame)
-    newstream._cache["frame_fit_result"] = result
+    return result
 
-    return newstream
+
+@fit_frame.register(StreamArmsBase)
+def _fit_frame_StreamArmsBase(
+    streams: StreamArmsBase,
+    rot0: _Rot0,
+    *,
+    minimizer: str | Callable[..., Any] = _default_minimize,
+    **minimizer_kwargs: Any,
+) -> dict[str, FrameOptimizeResult[Any]]:
+    """Fit Frame as many arms."""
+    results = {}
+    for k, v in streams.items():
+        results[k] = fit_frame(v, rot0=rot0, minimizer=minimizer, **minimizer_kwargs)
+    return results
 
 
 @fit_frame.register(Stream)
-def _fit_frame_stream(
-    stream: Stream, rot0: _Rot0, *, minimizer: str | Callable[..., Any] = _default_minimize, **minimizer_kwargs: Any
-) -> Stream:
+def _fit_frame_Stream(
+    stream: Stream,
+    rot0: _Rot0,
+    *,
+    minimizer: str | Callable[..., Any] = _default_minimize,
+    **minimizer_kwargs: Any,
+) -> FrameOptimizeResult[Any]:
+    """Fit Frame as one, not many arms."""
+    # Make dictionary of needed info
     info = _FitFrameNeededInfo(data=stream.data_coords, origin=stream.origin)
+    # Fit frame
     result: FrameOptimizeResult[Any] = _fit_frame_dict(info, rot0=rot0, minimizer=minimizer, **minimizer_kwargs)
 
-    # New Stream, with frame set
-    data = {}
-    for k, arm in stream.items():
-        newarm = replace(arm, frame=result.frame)
-        newarm._cache["frame_fit_result"] = result
-        data[k] = newarm
-
-    newstream = type(stream)(data, name=stream.name)
-    newstream._cache["frame_fit_result"] = result
-
-    return newstream
+    return result
 
 
 # -------------------------------------------------------------------
+# Minimizer dispatcher.
+# Since the keys are not instances of different classes, we cannot use singledispatch
+# and must roll our own equivalent using dictionaries.
 
 _X0T: TypeAlias = Tuple[float, float, float]
 _Dispatched: TypeAlias = Callable[[ndarray, _X0T, Mapping[str, Any]], object]
 
-MINIMIZER_DIPATCHER: dict[str | Callable[..., Any], _Dispatched] = {}
+MINIMIZER_DIPATCHER: dict[int, _Dispatched] = {}
+# hash(name or minimizer method) -> wrapper func
 
 
 def minimizer_dispatcher(key: str | Callable[..., Any]) -> Callable[[_Dispatched], _Dispatched]:
-    def inner(func: _Dispatched) -> _Dispatched:
-        MINIMIZER_DIPATCHER[key] = func
-        return func
+    """Register a minimizer function.
 
-    return inner
+    This is a decorator factory.
+
+    Parameters
+    ----------
+    key : str | Callable[..., Any]
+        The name or function of the minimization method.
+
+    Returns
+    -------
+    decorator : callable[[_Dispatched], _Dispatched]
+        The decorator that actually registers wrapper for the minimization function.
+        This decorator takes and returns the wrapper.
+    """
+
+    def decorator(method_wrapper: _Dispatched, /) -> _Dispatched:
+        """Register the minimization method wrapper func to the dispatch table.
+
+        Parameters
+        ----------
+        method_wrapper : _Dispatched
+            The wrapper function that interfaces with the minimization method.
+            The function should take the data, initial guess, and a dictionary
+            of kwargs and return the minimization result.
+
+        Returns
+        -------
+        method_wrapper : _Dispatched
+            The unmodified input argument.
+        """
+        MINIMIZER_DIPATCHER[hash(key)] = method_wrapper
+        return method_wrapper
+
+    return decorator
 
 
 @minimizer_dispatcher("scipy.optimize.minimize")
@@ -256,7 +298,34 @@ def scipy_optimize_leastsquares(
 def run_minimizer(
     minimizer: str | Callable[..., Any], data: NDArray[np.float64], x0: _X0T, minimizer_kwargs: Mapping[str, Any]
 ) -> object:
-    if minimizer not in MINIMIZER_DIPATCHER:
+    """Run the specifid minimizer on the data to find the optimal rotated frame.
+
+    The minimizer implementation must be registered with the dispatcher
+    ``MINIMIZER_DIPATCHER``.
+
+    Parameters
+    ----------
+    minimizer : str or callable[..., Any]
+        The minimizer method. Must be a key in the dispatcher.
+    data : NDArray[np.float64]
+        The data to finnd
+    x0 : tuple[float, float, float]
+        Initial position.
+    minimizer_kwargs : Mapping[str, Any]
+        Keyword arguments to minimizer.
+
+    Returns
+    -------
+    object
+        Result of minimizer.
+
+    Raises
+    ------
+    NotImplementedError
+        If :func:`hash` of ``minimizer`` is not in ``MINIMIZER_DIPATCHER``.
+    """
+    hashed = hash(minimizer)
+    if hashed not in MINIMIZER_DIPATCHER:
         raise NotImplementedError(f"minimizer {minimizer} not dispatched")
 
-    return MINIMIZER_DIPATCHER[minimizer](data, x0, minimizer_kwargs)
+    return MINIMIZER_DIPATCHER[hashed](data, x0, minimizer_kwargs)
