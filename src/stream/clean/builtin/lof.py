@@ -1,6 +1,4 @@
-# see LICENSE.rst
-
-"""Detect Outliers from Stream Data."""
+"""Local Outlier Factor (LOF) method of detecting stream outliears."""
 
 ##############################################################################
 # IMPORTS
@@ -25,6 +23,8 @@ if TYPE_CHECKING:
     # LOCAL
     from stream._typing import N1, NDFloat
 
+__all__: list[str] = []
+
 
 ##############################################################################
 # PARAMETERS
@@ -48,13 +48,11 @@ class KDTreeLOFBase(OutlierDetectorBase, Generic[KDT], register=False):
 
     @abstractmethod
     def fit(self, data: NDFloat[N1], /) -> None:
-        pass
+        super().fit(data)
 
     @abstractmethod
-    def predict(self, X: NDFloat[N1], /, threshold: float = 2, *, k: int = 10, **query_kw: Any) -> NDArray[np.bool_]:
-        # if k <= 1:
-        #     raise ValueError
-        pass
+    def predict(self, data: NDFloat[N1], /, threshold: float = 2, *, k: int = 10, **query_kw: Any) -> NDArray[np.bool_]:
+        return super().predict(data, threshold=threshold, k=k, **query_kw)
 
 
 class scipyKDTreeLOF(KDTreeLOFBase["KDTree"]):
@@ -62,9 +60,12 @@ class scipyKDTreeLOF(KDTreeLOFBase["KDTree"]):
         super().fit(data)
         object.__setattr__(self, "tree", KDTree(data, **self.kdtree_kw))
 
-    def predict(self, X: NDFloat[N1], /, threshold: float = 2, *, k: int = 10, **query_kw: Any) -> NDArray[np.bool_]:
+    def predict(self, data: NDFloat[N1], /, threshold: float = 2, *, k: int = 10, **query_kw: Any) -> NDArray[np.bool_]:
+        if k == 1:
+            raise ValueError("k must be > 1")
+
         # Query for k nearest
-        dx, idx_knn = self.tree.query(X, k=k, **query_kw)
+        dx, idx_knn = self.tree.query(data, k=k, **query_kw)
 
         # Get the distance of the most-distant neighbor
         radius = dx[:, -1]

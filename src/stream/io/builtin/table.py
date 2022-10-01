@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # STDLIB
+import copy
 import inspect
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,14 +12,16 @@ from astropy.coordinates import SkyCoord
 from astropy.table import QTable, Table
 
 # LOCAL
-from stream.core import StreamArm
 from stream.io.core import convert_registry
 from stream.io.normalize import StreamArmDataNormalizer
+from stream.stream.core import StreamArm
 from stream.utils.coord_utils import parse_framelike
 
 if TYPE_CHECKING:
     # THIRD PARTY
     from astropy.coordinates import BaseCoordinateFrame
+
+__all__: list[str] = []
 
 
 # ===================================================================
@@ -35,7 +38,7 @@ def stream_arm_from_table(
     Stream: type[StreamArm] | None = None,
     _cache: dict[str, Any] | None = None,
 ) -> StreamArm:
-    table_meta = cast("dict[str, Any]", table.meta)
+    table_meta = cast("dict[str, Any]", copy.copy(table.meta))
     # Stream class
     if Stream is None:
         Stream = table_meta.pop("Stream")
@@ -101,24 +104,6 @@ def table_identify(origin: str, format: str | None, /, *args: Any, **kwargs: Any
 
 
 # ===================================================================
-# Stream
-
-
-# def stream_from_table(
-#     table: Table,
-#     /,
-#     data_err: QTable | None = None,
-#     *,
-#     name: str | None = None,
-#     frame: BaseCoordinateFrame | None,
-#     origin: SkyCoord | None = None,
-#     Stream: type[StreamArm] | None = None,
-#     _caches: dict | None = None,
-# ):
-#     raise NotImplementedError
-
-
-# ===================================================================
 # Register
 
 register_StreamArm_from_format = {
@@ -127,10 +112,3 @@ register_StreamArm_from_format = {
     "func": stream_arm_from_table,
     "identify": table_identify,
 }
-
-# register_Stream_from_format = {
-#     "registry": convert_registry,
-#     "data_class": Stream,
-#     "func": stream_from_table,
-#     "identify": table_identify,
-# }

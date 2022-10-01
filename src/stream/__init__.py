@@ -3,11 +3,20 @@
 """This module contains class and functions for working with stellar streams."""
 
 # LOCAL
-from stream.core import StreamArm
-from stream.plural import Stream, StreamArms
+from stream import utils  # noqa: F401, TC002
+from stream.stream.core import StreamArm
+from stream.stream.stream import Stream
 
-__all__ = ["StreamArm", "Stream", "StreamArms"]
+__all__ = ["StreamArm", "Stream"]
 
+
+# ===================================================================
+
+# Fill in attrs, etc.
+# isort: split
+# LOCAL
+from stream import frame  # noqa: F401, TC002
+from stream import setup_package  # noqa: F401, TC002
 
 # ===================================================================
 # Register I/O
