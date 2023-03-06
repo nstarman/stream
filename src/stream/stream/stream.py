@@ -115,7 +115,6 @@ class Stream(StreamArmsBase, StreamBase):
     def __init__(
         self, data: dict[str, StreamArm] | None = None, /, *, name: str | None = None, **kwargs: StreamArm
     ) -> None:
-
         self.name: str | None
         super().__init__(data, name=name, **kwargs)
 
