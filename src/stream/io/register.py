@@ -51,7 +51,6 @@ class EPDict(TypedDict):
 
 @dataclass(frozen=True)
 class UnifiedIOEntryPointRegistrar:
-
     _ep_keys: ClassVar[frozenset[str]] = frozenset(getattr(EPDict, "__annotations__", {}).keys())
     """Do not change."""
 

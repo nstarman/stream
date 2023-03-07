@@ -10,7 +10,6 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Attribute(Generic[T]):
-
     obj: T
     attrs_loc: Literal["__dict__", "_attrs_"] | None = field(default="__dict__")
 
