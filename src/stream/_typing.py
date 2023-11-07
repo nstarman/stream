@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypeVar, Union
 
 # THIRD PARTY
-from astropy.coordinates import BaseCoordinateFrame
 from numpy import floating
 from numpy.typing import NBitBase, NDArray
 
 if TYPE_CHECKING:
     # THIRD PARTY
+    from astropy.coordinates import BaseCoordinateFrame
     from typing_extensions import TypeAlias
 
 
@@ -41,4 +41,4 @@ NDFloat = NDArray[floating[N1]]
 # -------------------------------------
 # Astropy types
 
-FrameLikeType: TypeAlias = Union[BaseCoordinateFrame, str]
+FrameLikeType: TypeAlias = Union["BaseCoordinateFrame", str]

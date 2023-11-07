@@ -1,8 +1,5 @@
 """Fit a Rotated reference frame."""
 
-##############################################################################
-# IMPORTS
-
 from __future__ import annotations
 
 # STDLIB
@@ -17,7 +14,6 @@ import scipy.optimize as opt
 from astropy.coordinates.matrix_utilities import rotation_matrix
 from astropy.units import Quantity
 from erfa import ufunc as erfa_ufunc
-from numpy import ndarray
 
 # LOCAL
 from stream.frame.result import FrameOptimizeResult
@@ -28,6 +24,7 @@ from stream.utils.coord_utils import get_frame
 
 if TYPE_CHECKING:
     # THIRD PARTY
+    from numpy import ndarray
     from numpy.typing import NDArray
     from typing_extensions import TypeAlias
 
@@ -235,7 +232,7 @@ def _fit_frame_Stream(
 # and must roll our own equivalent using dictionaries.
 
 _X0T: TypeAlias = Tuple[float, float, float]
-_Dispatched: TypeAlias = Callable[[ndarray, _X0T, Mapping[str, Any]], object]
+_Dispatched: TypeAlias = Callable[["ndarray", _X0T, Mapping[str, Any]], object]
 
 MINIMIZER_DIPATCHER: dict[int, _Dispatched] = {}
 # hash(name or minimizer method) -> wrapper func
