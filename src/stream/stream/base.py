@@ -32,8 +32,7 @@ StreamBaseT = TypeVar("StreamBaseT", bound="StreamBase")
 
 class SupportsFrame(Protocol):
     @property
-    def frame(self) -> BaseCoordinateFrame | None:
-        ...
+    def frame(self) -> BaseCoordinateFrame | None: ...
 
 
 class StreamLike(Protocol):
@@ -44,20 +43,16 @@ class StreamLike(Protocol):
     flags: Any
 
     @property
-    def full_name(self) -> str | None:
-        ...
+    def full_name(self) -> str | None: ...
 
     @property
-    def coords(self) -> SkyCoord:
-        ...
+    def coords(self) -> SkyCoord: ...
 
     @property
-    def frame(self) -> BaseCoordinateFrame | None:
-        ...
+    def frame(self) -> BaseCoordinateFrame | None: ...
 
     @property
-    def origin(self) -> SkyCoord:
-        ...
+    def origin(self) -> SkyCoord: ...
 
 
 ##############################################################################

@@ -6,8 +6,7 @@ from typing import Any, Generic, Mapping, Protocol, TypeVar, overload
 
 
 class _HasInitCache(Protocol):
-    def _init_cache(self, instance: Any) -> dict[str, Any]:
-        ...
+    def _init_cache(self, instance: Any) -> dict[str, Any]: ...
 
 
 Self = TypeVar("Self", bound=_HasInitCache)  # from typing_extensions import Self
@@ -22,12 +21,10 @@ EnclT = TypeVar("EnclT", bound="_SupportsCache")
 
 class CacheProperty(Generic[EnclT]):
     @overload
-    def __get__(self, instance: EnclT, _: None | type) -> MappingProxyType[str, Any]:
-        ...
+    def __get__(self, instance: EnclT, _: None | type) -> MappingProxyType[str, Any]: ...
 
     @overload
-    def __get__(self: Self, instance: None, _: None | type) -> Self:
-        ...
+    def __get__(self: Self, instance: None, _: None | type) -> Self: ...
 
     def __get__(self: Self, instance: EnclT | None, _: None | type) -> MappingProxyType[str, Any] | Self:
         if instance is None:
