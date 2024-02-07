@@ -26,13 +26,11 @@ __all__ = ["UnifiedIOEntryPointRegistrar"]
 
 
 class IdentifyCallable(Protocol):
-    def __call__(self, origin: str, format: str | None, /, *args: Any, **kwargs: Any) -> bool:
-        ...
+    def __call__(self, origin: str, format: str | None, /, *args: Any, **kwargs: Any) -> bool: ...
 
 
 class FuncCallable(Protocol):  # TODO!
-    def __call__(self, base: Any, /, *args: Any, **kwds: Any) -> Any:
-        ...
+    def __call__(self, base: Any, /, *args: Any, **kwds: Any) -> Any: ...
 
 
 class EPDict(TypedDict):

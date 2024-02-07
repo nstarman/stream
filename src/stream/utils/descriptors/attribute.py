@@ -22,12 +22,10 @@ class Attribute(Generic[T]):
 
     # TODO! use Self, not Attribute[T] when that works
     @overload
-    def __get__(self: Attribute[T], instance: None, _: Any) -> Attribute[T]:
-        ...
+    def __get__(self: Attribute[T], instance: None, _: Any) -> Attribute[T]: ...
 
     @overload
-    def __get__(self: Attribute[T], instance: object, _: Any) -> T:
-        ...
+    def __get__(self: Attribute[T], instance: object, _: Any) -> T: ...
 
     def __get__(self: Attribute[T], instance: object | None, _: Any) -> Attribute[T] | T:
         if instance is None:
